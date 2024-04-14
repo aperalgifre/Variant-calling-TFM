@@ -3,6 +3,7 @@ library(VariantAnnotation)
 library(shinyWidgets)
 
 # Define UI
+
 ui <- fluidPage(
   titlePanel("VCF File Analysis"),
   sidebarLayout(
