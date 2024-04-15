@@ -2,8 +2,10 @@ library(shiny)
 library(VariantAnnotation)
 library(shinyWidgets)
 
-# Define UI
+# Set maximum upload size
+options(shiny.maxRequestSize = 500*1024^2) # Set maximum upload size to 500 MB
 
+# Define UI
 ui <- fluidPage(
   titlePanel("VCF File Analysis"),
   sidebarLayout(
@@ -11,14 +13,22 @@ ui <- fluidPage(
       fileInput("vcf_file", "Choose a VCF file"),
       uiOutput("allele_freq_selector"),
       uiOutput("variant_type_selector"),
-      uiOutput("pathogenicity_key_selector")
+      uiOutput("pathogenicity_key_selector"),
+      uiOutput("pathogenicity_category_selector"),
+      actionButton("run_analysis", "Run analysis")
     ),
     mainPanel(
       h4("Analysis Results:"),
       fluidRow(
-        column(6, tableOutput("variant_counts")),
-        column(6, plotOutput("variant_types_plot", width = "100%")),
-        column(12, tableOutput("pathogenic_variants"))
+        column(6, 
+               conditionalPanel(condition = "input.run_analysis",
+                                tableOutput("variant_counts"))),
+        column(6, 
+               conditionalPanel(condition = "input.run_analysis",
+                                plotOutput("variant_types_plot", width = "100%"))),
+        column(12, 
+               conditionalPanel(condition = "input.run_analysis",
+                                tableOutput("pathogenic_variants")))
       )
     )
   )
@@ -30,6 +40,7 @@ server <- function(input, output, session) {
   allele_freq_keys <- reactiveVal(character(0))
   variant_type_keys <- reactiveVal(character(0))
   pathogenic_keys <- reactiveVal(character(0))
+  pathogenic_categories <- reactiveVal(character(0))
   
   # Read VCF file
   vcf_data <- reactive({
@@ -69,23 +80,29 @@ server <- function(input, output, session) {
     }
   })
   
-  # Perform analysis when VCF file is loaded and keys are selected
-  observeEvent({
-    input$allele_freq_key
-    input$variant_type_key
-    input$pathogenic_key
-  }, {
+  # Update UI elements for selecting pathogenicity categories
+  observe({
+    if (!is.null(vcf_data()) && !is.null(input$pathogenic_key)) {
+      # Extract pathogenicity categories
+      pathogenic_categories(unique(info(vcf_data())[[input$pathogenic_key]]))
+      
+      output$pathogenicity_category_selector <- renderUI({
+        selectizeInput("pathogenic_categories", "Select Pathogenicity Categories:",
+                       choices = pathogenic_categories(), multiple = TRUE)
+      })
+    }
+  })
+  
+  # Perform analysis when "Run analysis" button is clicked
+  observeEvent(input$run_analysis, {
     # Perform analysis if all keys are selected
-    if (!is.null(input$allele_freq_key) && input$variant_type_key != "" && input$pathogenic_key != ""){
-      analyze_vcf(vcf_data(), input$allele_freq_key, input$variant_type_key, input$pathogenic_key)
-    } else {
-      # Clear plot if no option is selected
-      output$variant_types_plot <- renderPlot(NULL)
+    if (!is.null(input$allele_freq_key) && input$variant_type_key != "" && input$pathogenic_key != "" && !is.null(input$pathogenic_categories)){
+      analyze_vcf(vcf_data(), input$allele_freq_key, input$variant_type_key, input$pathogenic_key, input$pathogenic_categories)
     }
   })
   
   # Function to perform analysis
-  analyze_vcf <- function(vcf, allele_freq_keys, variant_type_key, pathogenic_key) {
+  analyze_vcf <- function(vcf, allele_freq_keys, variant_type_key, pathogenic_key, pathogenic_categories) {
     # Variant counts
     num_variants <- nrow(vcf)
     
@@ -98,27 +115,25 @@ server <- function(input, output, session) {
       })
     })
     
-    # Filter pathogenic variants based on pathogenic key
+    # Filter pathogenic variants based on selected categories
     pathogenic_variants <- tryCatch({
       clnsig_values <- info(vcf)[[pathogenic_key]]
-      print(clnsig_values)
-      subset(vcf, clnsig_values %in% c("Pathogenic", "Likely_pathogenic"))
+      subset(vcf, clnsig_values %in% pathogenic_categories)
     }, error = function(e) {
       return(data.frame())
     })
     
-    # Extract all pathogenic key values into a dataframe
-    df_pathogenic <- as.data.frame(info(vcf)[[pathogenic_key]])
- 
-    # Count Pathogenic and Likely_pathogenic variants separately
-    num_pathogenic <- nrow(subset(df_pathogenic, df_pathogenic$value == "Pathogenic"))
-    num_likely_pathogenic <- nrow(subset(df_pathogenic, df_pathogenic$value == "Likely_pathogenic"))
+    # Create a data frame for pathogenic variants
+    pathogenic_table <- data.frame(Category = pathogenic_categories, Count = numeric(length(pathogenic_categories)), stringsAsFactors = FALSE)
     
-    # Create separate table for pathogenic variants
-    pathogenic_table <- data.frame(
-      "Pathogenic" = num_pathogenic,
-      "Likely_pathogenic" = num_likely_pathogenic
-    )
+    # Count occurrences for each selected category
+    category_counts <- table(factor(info(vcf)[[pathogenic_key]], levels = pathogenic_categories))
+    pathogenic_table$Count <- as.numeric(category_counts)
+    
+    # Add a row for the total count of each category
+    total_count <- colSums(pathogenic_table[, "Count", drop = FALSE])
+    total_row <- c("Total", total_count)
+    pathogenic_table <- rbind(pathogenic_table, total_row)
     
     # Perform analysis for variant type key
     variant_types <- tryCatch({
