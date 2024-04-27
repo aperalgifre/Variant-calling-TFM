@@ -1,5 +1,6 @@
 library(shiny)
 library(VariantAnnotation)
+library(data.table)
 library(shinyWidgets)
 
 # Set maximum upload size
@@ -15,7 +16,8 @@ ui <- fluidPage(
       uiOutput("variant_type_selector"),
       uiOutput("pathogenicity_key_selector"),
       uiOutput("pathogenicity_category_selector"),
-      actionButton("run_analysis", "Run analysis")
+      actionButton("run_analysis", "Run analysis"),
+      downloadButton("download_csv", "Download Filtered Variants CSV")
     ),
     mainPanel(
       h4("Analysis Results:"),
@@ -101,6 +103,49 @@ server <- function(input, output, session) {
     }
   })
   
+  # Define a reactive expression to filter variants and return the filtered dataframe
+  filtered_variants <- reactive({
+    req(input$vcf_file, input$pathogenic_key, input$pathogenic_categories)
+    
+    # Read VCF file
+    vcf <- readVcf(input$vcf_file$datapath, "hg19")
+    
+    # Filter pathogenic variants based on selected key and categories
+    pathogenic_variants <- tryCatch({
+      clnsig_values <- info(vcf)[[input$pathogenic_key]]
+      subset(vcf, clnsig_values %in% input$pathogenic_categories)
+    }, error = function(e) {
+      return(data.frame())
+    })
+    
+    # Process the filtered variants
+    chrom <- as.data.frame(seqnames(rowRanges(pathogenic_variants)))
+    ranges <- (as.data.frame(ranges(rowRanges(pathogenic_variants)))[, -c(2,3)])
+    ref <- as.data.frame(ref(pathogenic_variants))
+    alt <- as.data.frame(alt(pathogenic_variants))[, -c(1,2)]
+    qual <- as.data.frame(qual(pathogenic_variants))
+    filter <- as.data.frame(filt(pathogenic_variants))
+    info <- as.data.frame(info(pathogenic_variants))
+    
+    partial_df <- cbind(chrom, ranges, ref, alt, qual, filter)
+    colnames(partial_df) <- c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER")
+    completed_df <- cbind(partial_df, info)
+    rownames(completed_df) <- NULL
+    
+    return(completed_df)
+  })
+  
+  # Render the download button
+  output$download_csv <- downloadHandler(
+    filename = function() {
+      paste0("filtered_variants", ".csv")
+    },
+    content = function(file) {
+      # Write filtered dataframe to CSV file
+      fwrite(filtered_variants(), file, row.names = FALSE)
+    }
+  )
+  
   # Function to perform analysis
   analyze_vcf <- function(vcf, allele_freq_keys, variant_type_key, pathogenic_key, pathogenic_categories) {
     # Variant counts
@@ -171,4 +216,4 @@ server <- function(input, output, session) {
 }
 
 # Run the application
-shinyApp(ui = ui, server = server)
+shinyApp(ui, server)
