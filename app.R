@@ -3,36 +3,85 @@ library(VariantAnnotation)
 library(data.table)
 library(shinyWidgets)
 library(RTCGA)
-
-# Set maximum upload size
-options(shiny.maxRequestSize = 500*1024^2) # Set maximum upload size to 500 MB
+library(DT)
+library(ggplot2)
 
 # Define UI
 ui <- fluidPage(
+  tags$head(
+    tags$style(
+      HTML("
+        body {
+          background-color: #f9f9f9;
+        }
+        .title {
+          font-family: 'Arial', sans-serif;
+          color: #333333;
+          font-size: 24px;
+          font-weight: bold;
+          margin-bottom: 20px;
+        }
+        .subtitle {
+          font-family: 'Arial', sans-serif;
+          color: #666666;
+          font-size: 18px;
+          margin-bottom: 10px;
+        }
+        .panel-heading {
+          background-color: #f0f0f0;
+          border: 1px solid #cccccc;
+          padding: 10px;
+        }
+        .sidebar-panel {
+          background-color: #ffffff;
+          border: 1px solid #cccccc;
+          padding: 20px;
+          margin-bottom: 20px;
+        }
+        .main-panel {
+          background-color: #ffffff;
+          border: 1px solid #cccccc;
+          padding: 20px;
+          margin-bottom: 20px;
+        }
+        .btn-primary {
+          background-color: #007bff;
+          border-color: #007bff;
+        }
+        .btn-primary:hover {
+          background-color: #0056b3;
+          border-color: #0056b3;
+        }
+      ")
+    )
+  ),
   titlePanel("VCF File Analysis"),
   sidebarLayout(
     sidebarPanel(
+      class = "sidebar-panel",
       fileInput("vcf_file", "Choose a VCF file"),
+      h3("Select Analysis Parameters", class = "subtitle"),
       uiOutput("allele_freq_selector"),
       uiOutput("variant_type_selector"),
       uiOutput("pathogenicity_key_selector"),
       uiOutput("pathogenicity_category_selector"),
       uiOutput("cancer_type_selector"),  # New select input for TCGA cancer type
-      actionButton("run_analysis", "Run analysis"),
-      downloadButton("download_csv", "Download Filtered Variants CSV")
+      actionButton("run_analysis", "Run Analysis", class = "btn-primary"),
+      downloadButton("download_csv", "Download Filtered Variants CSV", class = "btn-primary")
     ),
     mainPanel(
-      h4("Analysis Results:"),
+      class = "main-panel",
+      h4("Analysis Results:", class = "title"),
       fluidRow(
         column(6, 
                conditionalPanel(condition = "input.run_analysis",
-                                tableOutput("variant_counts"))),
+                                DTOutput("variant_counts"))),
         column(6, 
                conditionalPanel(condition = "input.run_analysis",
                                 plotOutput("variant_types_plot", width = "100%"))),
         column(12, 
                conditionalPanel(condition = "input.run_analysis",
-                                tableOutput("pathogenic_variants")))
+                                DTOutput("pathogenic_variants")))
       )
     )
   )
@@ -87,9 +136,9 @@ server <- function(input, output, session) {
       
       output$cancer_type_selector <- renderUI({
         selectInput("cancer_type", "Select TCGA Cancer Type:",
-                    choices = c("ACC","BLCA", "BRCA", "CESC", "CHOL", "COAD", "COADREAD", "DLBC", "ESCA", "GBMLGG", "GBM", "HNSC", "KICH", 
+                    choices = c("No Cancer Selected", "ACC","BLCA", "BRCA", "CESC", "CHOL", "COAD", "COADREAD", "DLBC", "ESCA", "GBMLGG", "GBM", "HNSC", "KICH", 
                                 "KIPAN", "KIRC", "KIRP", "LAML", "LGG", "LIHC", "LUAD", "LUSC", "OV", "PAAD", "PCPG", "PRAD", "READ", "SARC",
-                                "SKCM", "STAD", "STES", "TGCT", "THCA", "UCEC", "UCS", "UVM"), selected = "BRCA")
+                                "SKCM", "STAD", "STES", "TGCT", "THCA", "UCEC", "UCS", "UVM"), selected = "No Cancer Selected")
       })
     }
   })
@@ -131,8 +180,8 @@ server <- function(input, output, session) {
     
     # Filter pathogenic variants based on selected categories
     pathogenic_variants <- tryCatch({
-      clnsig_values <- info(vcf)[[pathogenic_key]]
-      subset(vcf, clnsig_values %in% input$pathogenic_categories)
+      interest_values <- info(vcf)[[pathogenic_key]]
+      subset(vcf, interest_values %in% input$pathogenic_categories)
     }, error = function(e) {
       return(data.frame())
     })
@@ -161,21 +210,35 @@ server <- function(input, output, session) {
     })
     
     # Update outputs
-    output$variant_counts <- renderTable({
+    output$variant_counts <- renderDT({
       data.frame(
         "Number of Variants" = num_variants,
         "Variants with Frequency > 0.5" = sum(num_variants_high_freq)
       )
-    }, rownames = FALSE)
+    }, rownames = FALSE,
+    options = list(
+      dom ='t',
+      searching = FALSE
+    ))
     
-    output$pathogenic_variants <- renderTable({
+    output$pathogenic_variants <- renderDT({
       pathogenic_table
-    }, rownames = FALSE)
+    }, rownames = FALSE,
+    options = list(
+      dom ='t',
+      searching = FALSE,
+      initComplete = JS(
+        "function(settings, json) {",
+        "$(this.api().table().container()).css({'padding-top': '50px'});",
+        "}")
+    ))
     
     output$variant_types_plot <- renderPlot({
       if (nrow(variant_types) > 0) {
-        barplot(variant_types$Freq, names.arg = variant_types$Var1,
-                xlab = "Variant Type", ylab = "Frequency", main = "Variant Types")
+        ggplot(variant_types, aes(x = Var1, y = Freq)) +
+          geom_bar(stat = "identity") +
+          geom_text(aes(label = Freq), vjust = -0.5, size = 3) +
+          labs(x = "Variant Type", y = "Frequency", title = "Variant Types")
       } else {
         plot(1, type = "n", xlab = "", ylab = "", main = "Variant Types")
         text(1, 1, "No variant types found", cex = 1.2, col = "red", font = 2)
@@ -192,8 +255,8 @@ server <- function(input, output, session) {
     
     # Filter pathogenic variants based on selected key and categories
     pathogenic_variants <- tryCatch({
-      clnsig_values <- info(vcf)[[input$pathogenic_key]]
-      subset(vcf, clnsig_values %in% input$pathogenic_categories)
+      interest_values <- info(vcf)[[input$pathogenic_key]]
+      subset(vcf, interest_values %in% input$pathogenic_categories)
     }, error = function(e) {
       return(data.frame())
     })
@@ -223,6 +286,13 @@ server <- function(input, output, session) {
     content = function(file) {
       req(input$cancer_type)
       
+      # Check if "No Cancer Selected" option is chosen
+      if (input$cancer_type == "No Cancer Selected") {
+        # Return filtered dataframe without adding the extra column
+        fwrite(filtered_variants(), file, row.names = FALSE)
+        return()
+      }
+      
       # Download TCGA data
       temp_dir <- tempdir()
       downloadTCGA(input$cancer_type, dataSet = 'Mutation_Packager_Calls.Level', destDir = temp_dir)
@@ -240,7 +310,7 @@ server <- function(input, output, session) {
       if (!is.null(data)) {
         filtered_df$Present_in_TCGA <- ifelse(apply(filtered_df, 1, function(row) {
           any(apply(data, 1, function(tcga_row) {
-            paste(row["CHROM"], row["POS"], row["REF"]) == paste(tcga_row["Chromosome"], tcga_row["Start_Position"], tcga_row["Reference_Allele"])
+            paste(row["CHROM"], row["POS"], row["ALT"]) == paste(tcga_row["Chromosome"], tcga_row["Start_Position"], tcga_row["Tumor_Seq_Allele2"])
           }))
         }), "Yes", "No")
       } else {
