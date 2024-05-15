@@ -63,9 +63,9 @@ ui <- fluidPage(
       h3("Select Analysis Parameters", class = "subtitle"),
       uiOutput("allele_freq_selector"),
       uiOutput("variant_type_selector"),
-      uiOutput("pathogenicity_key_selector"),
-      uiOutput("pathogenicity_category_selector"),
-      uiOutput("cancer_type_selector"),  # New select input for TCGA cancer type
+      uiOutput("clinical_significance_selector"),
+      uiOutput("clinical_significance_categories"),
+      uiOutput("cancer_type_selector"),  
       actionButton("run_analysis", "Run Analysis", class = "btn-primary"),
       downloadButton("download_csv", "Download Filtered Variants CSV", class = "btn-primary")
     ),
@@ -81,7 +81,7 @@ ui <- fluidPage(
                                 plotOutput("variant_types_plot", width = "100%"))),
         column(12, 
                conditionalPanel(condition = "input.run_analysis",
-                                DTOutput("pathogenic_variants")))
+                                DTOutput("clinical_significance_variants")))
       )
     )
   )
@@ -95,8 +95,8 @@ server <- function(input, output, session) {
   # Initialize reactive values to store INFO keys
   allele_freq_keys <- reactiveVal(character(0))
   variant_type_keys <- reactiveVal(character(0))
-  pathogenic_keys <- reactiveVal(character(0))
-  pathogenic_categories <- reactiveVal(character(0))
+  clinical_significance_keys <- reactiveVal(character(0))
+  clinical_significance_categories <- reactiveVal(character(0))
   
   # Read VCF file
   vcf_data <- reactive({
@@ -110,7 +110,7 @@ server <- function(input, output, session) {
     # Update reactive values with INFO keys
     allele_freq_keys(info_keys)
     variant_type_keys(info_keys)
-    pathogenic_keys(info_keys)
+    clinical_significance_keys(info_keys)
     
     return(vcf)
   })
@@ -129,9 +129,9 @@ server <- function(input, output, session) {
                            choices = c("", variant_type_keys()), selected = "")
       })
       
-      output$pathogenicity_key_selector <- renderUI({
-        shiny::selectInput("pathogenic_key", "Select Pathogenicity Key:",
-                           choices = c("", pathogenic_keys()), selected = "")
+      output$clinical_significance_selector <- renderUI({
+        shiny::selectInput("clinical_significance_key", "Select Clinical Significance Key:",
+                           choices = c("", clinical_significance_keys()), selected = "")
       })
       
       output$cancer_type_selector <- renderUI({
@@ -143,15 +143,15 @@ server <- function(input, output, session) {
     }
   })
   
-  # Update UI elements for selecting pathogenicity categories
+  # Update UI elements for selecting clinical significance categories
   observe({
-    if (!is.null(vcf_data()) && !is.null(input$pathogenic_key)) {
-      # Extract pathogenicity categories
-      pathogenic_categories(unique(info(vcf_data())[[input$pathogenic_key]]))
+    if (!is.null(vcf_data()) && !is.null(input$clinical_significance_key)) {
+      # Extract clinical significance categories of interest
+      clinical_significance_categories(unique(info(vcf_data())[[input$clinical_significance_key]]))
       
-      output$pathogenicity_category_selector <- renderUI({
-        selectizeInput("pathogenic_categories", "Select Pathogenicity Categories:",
-                       choices = pathogenic_categories(), multiple = TRUE)
+      output$clinical_significance_categories <- renderUI({
+        selectizeInput("clinical_significance_categories", "Select Clinical Significance Categories:",
+                       choices = clinical_significance_categories(), multiple = TRUE)
       })
     }
   })
@@ -159,13 +159,13 @@ server <- function(input, output, session) {
   # Perform analysis when "Run analysis" button is clicked
   observeEvent(input$run_analysis, {
     # Perform analysis if all keys are selected
-    if (!is.null(input$allele_freq_key) && input$variant_type_key != "" && input$pathogenic_key != "" && !is.null(input$pathogenic_categories)){
-      analyze_vcf(vcf_data(), input$allele_freq_key, input$variant_type_key, input$pathogenic_key, input$pathogenic_categories)
+    if (!is.null(input$allele_freq_key) && input$variant_type_key != "" && input$clinical_significance_key != "" && !is.null(input$clinical_significance_categories)){
+      analyze_vcf(vcf_data(), input$allele_freq_key, input$variant_type_key, input$clinical_significance_key, input$clinical_significance_categories)
     }
   })
   
   # Function to perform analysis
-  analyze_vcf <- function(vcf, allele_freq_keys, variant_type_key, pathogenic_key, pathogenic_categories) {
+  analyze_vcf <- function(vcf, allele_freq_keys, variant_type_key, clinical_significance_key, clinical_significance_categories) {
     # Variant counts
     num_variants <- nrow(vcf)
     
@@ -179,18 +179,18 @@ server <- function(input, output, session) {
     })
     
     # Filter pathogenic variants based on selected categories
-    pathogenic_variants <- tryCatch({
-      interest_values <- info(vcf)[[pathogenic_key]]
-      subset(vcf, interest_values %in% input$pathogenic_categories)
+    clinical_significance_variants <- tryCatch({
+      interest_values <- info(vcf)[[clinical_significance_key]]
+      subset(vcf, interest_values %in% input$clinical_significance_categories)
     }, error = function(e) {
       return(data.frame())
     })
     
     # Create a data frame for pathogenic variants
-    pathogenic_table <- data.frame(Category = pathogenic_categories, Count = numeric(length(pathogenic_categories)), stringsAsFactors = FALSE)
+    pathogenic_table <- data.frame(Category = clinical_significance_categories, Count = numeric(length(clinical_significance_categories)), stringsAsFactors = FALSE)
     
     # Count occurrences for each selected category
-    category_counts <- table(factor(info(vcf)[[pathogenic_key]], levels = pathogenic_categories))
+    category_counts <- table(factor(info(vcf)[[clinical_significance_key]], levels = clinical_significance_categories))
     pathogenic_table$Count <- as.numeric(category_counts)
     
     # Add a row for the total count of each category
@@ -221,7 +221,7 @@ server <- function(input, output, session) {
       searching = FALSE
     ))
     
-    output$pathogenic_variants <- renderDT({
+    output$clinical_significance_variants <- renderDT({
       pathogenic_table
     }, rownames = FALSE,
     options = list(
@@ -248,27 +248,27 @@ server <- function(input, output, session) {
   
   # Define a reactive expression to filter variants and return the filtered dataframe
   filtered_variants <- reactive({
-    req(input$vcf_file, input$pathogenic_key, input$pathogenic_categories)
+    req(input$vcf_file, input$clinical_significance_key, input$clinical_significance_categories)
     
     # Read VCF file
     vcf <- readVcf(input$vcf_file$datapath, "hg19")
     
     # Filter pathogenic variants based on selected key and categories
-    pathogenic_variants <- tryCatch({
-      interest_values <- info(vcf)[[input$pathogenic_key]]
-      subset(vcf, interest_values %in% input$pathogenic_categories)
+    clinical_significance_variants <- tryCatch({
+      interest_values <- info(vcf)[[input$clinical_significance_key]]
+      subset(vcf, interest_values %in% input$clinical_significance_categories)
     }, error = function(e) {
       return(data.frame())
     })
     
     # Process the filtered variants
-    chrom <- as.data.frame(seqnames(rowRanges(pathogenic_variants)))
-    ranges <- (as.data.frame(ranges(rowRanges(pathogenic_variants)))[, -c(2,3)])
-    ref <- as.data.frame(ref(pathogenic_variants))
-    alt <- as.data.frame(alt(pathogenic_variants))[, -c(1,2)]
-    qual <- as.data.frame(qual(pathogenic_variants))
-    filter <- as.data.frame(filt(pathogenic_variants))
-    info <- as.data.frame(info(pathogenic_variants))
+    chrom <- as.data.frame(seqnames(rowRanges(clinical_significance_variants)))
+    ranges <- (as.data.frame(ranges(rowRanges(clinical_significance_variants)))[, -c(2,3)])
+    ref <- as.data.frame(ref(clinical_significance_variants))
+    alt <- as.data.frame(alt(clinical_significance_variants))[, -c(1,2)]
+    qual <- as.data.frame(qual(clinical_significance_variants))
+    filter <- as.data.frame(filt(clinical_significance_variants))
+    info <- as.data.frame(info(clinical_significance_variants))
     
     partial_df <- cbind(chrom, ranges, ref, alt, qual, filter)
     colnames(partial_df) <- c("CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER")
