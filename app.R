@@ -136,8 +136,8 @@ server <- function(input, output, session) {
       
       output$cancer_type_selector <- renderUI({
         selectInput("cancer_type", "Select TCGA Cancer Type:",
-                    choices = c("No Cancer Selected", "ACC","BLCA", "BRCA", "CESC", "CHOL", "COAD", "COADREAD", "DLBC", "ESCA", "GBMLGG", "GBM", "HNSC", "KICH", 
-                                "KIPAN", "KIRC", "KIRP", "LAML", "LGG", "LIHC", "LUAD", "LUSC", "OV", "PAAD", "PCPG", "PRAD", "READ", "SARC",
+                    choices = c("No Cancer Selected", "ACC","BLCA", "BRCA", "CESC", "CHOL", "COAD", "COADREAD", "DLBC", "ESCA", "GBMLGG", "GBM", "HNSC", 
+                                "KICH", "KIPAN", "KIRC", "KIRP", "LAML", "LGG", "LIHC", "LUAD", "LUSC", "OV", "PAAD", "PCPG", "PRAD", "READ", "SARC",
                                 "SKCM", "STAD", "STES", "TGCT", "THCA", "UCEC", "UCS", "UVM"), selected = "No Cancer Selected")
       })
     }
@@ -178,7 +178,7 @@ server <- function(input, output, session) {
       })
     })
     
-    # Filter pathogenic variants based on selected categories
+    # Filter clinical significance variants based on selected categories
     clinical_significance_variants <- tryCatch({
       interest_values <- info(vcf)[[clinical_significance_key]]
       subset(vcf, interest_values %in% input$clinical_significance_categories)
@@ -186,8 +186,9 @@ server <- function(input, output, session) {
       return(data.frame())
     })
     
-    # Create a data frame for pathogenic variants
-    pathogenic_table <- data.frame(Category = clinical_significance_categories, Count = numeric(length(clinical_significance_categories)), stringsAsFactors = FALSE)
+    # Create a data frame for clinical signficance variants
+    pathogenic_table <- data.frame(Category = clinical_significance_categories, Count = numeric(length(clinical_significance_categories)), 
+                                   stringsAsFactors = FALSE)
     
     # Count occurrences for each selected category
     category_counts <- table(factor(info(vcf)[[clinical_significance_key]], levels = clinical_significance_categories))
@@ -250,10 +251,7 @@ server <- function(input, output, session) {
   filtered_variants <- reactive({
     req(input$vcf_file, input$clinical_significance_key, input$clinical_significance_categories)
     
-    # Read VCF file
-    vcf <- readVcf(input$vcf_file$datapath, "hg19")
-    
-    # Filter pathogenic variants based on selected key and categories
+    # Filter clinical significance variants based on selected key and categories
     clinical_significance_variants <- tryCatch({
       interest_values <- info(vcf)[[input$clinical_significance_key]]
       subset(vcf, interest_values %in% input$clinical_significance_categories)
