@@ -251,6 +251,9 @@ server <- function(input, output, session) {
   filtered_variants <- reactive({
     req(input$vcf_file, input$clinical_significance_key, input$clinical_significance_categories)
     
+    # Read VCF file
+    vcf <- readVcf(input$vcf_file$datapath, "hg19")
+    
     # Filter clinical significance variants based on selected key and categories
     clinical_significance_variants <- tryCatch({
       interest_values <- info(vcf)[[input$clinical_significance_key]]
